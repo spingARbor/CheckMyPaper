@@ -9,7 +9,6 @@ import streamlit as st
 import os
 import importlib
 import sys
-import asyncio
 
 # 设置页面配置
 st.set_page_config(
@@ -56,66 +55,103 @@ uploaded_file = st.file_uploader("上传论文 (仅限 PDF)", type=['pdf'])
 
 if uploaded_file and selected_conf:
     st.divider()
-    
+
     # 动态导入对应的检查模块
     module_name = f"check_logic.{selected_conf}"
-    
+
     try:
         checker_module = importlib.import_module(module_name)
-        
+
         if st.button(f"开始检查 ({selected_conf})", type="primary"):
             with st.spinner("正在本地分析文档结构 (这可能需要几秒钟)..."):
-                # 调用核心检查函数 (使用 await 调用异步函数)
-                # 注意：文件指针在读取后需要重置，但 fitz.open(stream=...) 处理字节流，这里传递 file object
                 uploaded_file.seek(0)
                 try:
-                    # Use asyncio to run the async function
+                    # Use Pyodide's top-level await support
+                    # In Pyodide/Stlite, we can use await at the top level
                     import asyncio
-                    results = asyncio.ensure_future(checker_module.run_check(uploaded_file))
-                    # Wait for the result
-                    while not results.done():
-                        pass
-                    results = results.result()
+
+                    # Check if we're in an async context
+                    try:
+                        # Try to get the running loop
+                        loop = asyncio.get_running_loop()
+                        # We have a running loop, so we need to use ensure_future
+                        # and then use a callback
+                        future = asyncio.ensure_future(checker_module.run_check(uploaded_file))
+
+                        # Store result in session state to avoid blocking
+                        if 'check_result' not in st.session_state:
+                            st.session_state.check_result = None
+
+                        def on_complete(task):
+                            try:
+                                st.session_state.check_result = task.result()
+                            except Exception as e:
+                                import traceback
+                                st.session_state.check_result = {
+                                    "status": "error",
+                                    "message": f"处理出错: {type(e).__name__}: {str(e)}",
+                                    "traceback": traceback.format_exc()
+                                }
+                            # Trigger a rerun to show results
+                            st.rerun()
+
+                        future.add_done_callback(on_complete)
+
+                        # Show a message that processing is in progress
+                        st.info("正在处理中，请稍候...")
+                        st.stop()
+
+                    except RuntimeError:
+                        # No running loop, we can use asyncio.run()
+                        results = asyncio.run(checker_module.run_check(uploaded_file))
+                        st.session_state.check_result = results
+
                 except Exception as e:
                     import traceback
-                    results = {
+                    st.session_state.check_result = {
                         "status": "error",
                         "message": f"调用检查函数时出错: {type(e).__name__}: {str(e)}",
                         "traceback": traceback.format_exc()
                     }
 
-            # --- 结果展示逻辑 ---
-            if results["status"] == "error":
-                st.error(f"分析过程中发生错误: {results.get('message')}")
-                # 显示详细的 traceback
-                if "traceback" in results:
-                    with st.expander("查看详细错误信息"):
-                        st.code(results["traceback"])
-            else:
-                violations = results["violations"]
-                
-                if not violations:
-                    st.balloons()
-                    st.success("🎉 完美！未检测到明显的格式违规。")
+            # Check if we have results in session state
+            if 'check_result' in st.session_state and st.session_state.check_result:
+                results = st.session_state.check_result
+                # Clear the result after displaying
+                st.session_state.check_result = None
+
+                # --- 结果展示逻辑 ---
+                if results["status"] == "error":
+                    st.error(f"分析过程中发生错误: {results.get('message')}")
+                    # 显示详细的 traceback
+                    if "traceback" in results:
+                        with st.expander("查看详细错误信息"):
+                            st.code(results["traceback"])
                 else:
-                    st.warning(f"⚠️ 检测到 {len(violations)} 个潜在问题")
-                    
-                    # 按类型分组展示 (可选)
-                    for i, v in enumerate(violations, 1):
-                        # 根据违规类型选择图标
-                        icon = "🔴" if "Margin" in v['type'] else "🟡"
-                        
-                        label = f"{icon} Page {v.get('page', '?')}: {v['type']}"
-                        
-                        with st.expander(label):
-                            col1, col2 = st.columns([1, 3])
-                            with col1:
-                                st.caption("位置 / 区域")
-                                st.code(str(v.get('bbox', 'N/A')))
-                            with col2:
-                                st.caption("相关文本片段")
-                                st.info(v.get('text', 'N/A'))
-                                
+                    violations = results["violations"]
+
+                    if not violations:
+                        st.balloons()
+                        st.success("🎉 完美！未检测到明显的格式违规。")
+                    else:
+                        st.warning(f"⚠️ 检测到 {len(violations)} 个潜在问题")
+
+                        # 按类型分组展示 (可选)
+                        for i, v in enumerate(violations, 1):
+                            # 根据违规类型选择图标
+                            icon = "🔴" if "Margin" in v['type'] else "🟡"
+
+                            label = f"{icon} Page {v.get('page', '?')}: {v['type']}"
+
+                            with st.expander(label):
+                                col1, col2 = st.columns([1, 3])
+                                with col1:
+                                    st.caption("位置 / 区域")
+                                    st.code(str(v.get('bbox', 'N/A')))
+                                with col2:
+                                    st.caption("相关文本片段")
+                                    st.info(v.get('text', 'N/A'))
+
     except ModuleNotFoundError:
         st.error(f"无法加载脚本: {module_name}")
     except Exception as e:
