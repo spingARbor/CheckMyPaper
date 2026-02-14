@@ -112,21 +112,20 @@ class Page:
 
         return (min(x0_vals), min(y0_vals), max(x1_vals), max(y1_vals))
 
-    def get_pixmap(self, clip=None, colorspace=None, alpha=False):
+    async def get_pixmap(self, clip=None, colorspace=None, alpha=False):
         """Get pixel data for a region"""
         if clip is None:
             clip = self.rect
 
         # Call JavaScript bridge - it returns a Promise
-        # Use to_py() to wait for the promise to resolve
         promise = js.pdfBridge.getPixelData(
             self.page_num,
             clip.x0, clip.y0,
             clip.width, clip.height
         )
 
-        # Convert promise to Python - this will wait for it to resolve
-        result = promise.to_py()
+        # Await the promise to get the resolved value
+        result = await promise
 
         pixels_js = result.pixels
         pixels_list = [int(pixels_js[i]) for i in range(len(pixels_js))]
@@ -145,9 +144,8 @@ class Document:
         self.num_pages = 0
         self._pages = []
         self._pdf_data = None
-        self._load()
 
-    def _load(self):
+    async def _load(self):
         """Load PDF using PDF.js bridge"""
         # Convert bytes to Uint8Array for JavaScript
         uint8_array = to_js(self.file_bytes)
@@ -155,8 +153,8 @@ class Document:
         # Call the async JavaScript function - it returns a Promise
         promise = js.pdfBridge.loadPdfComplete(uint8_array)
 
-        # Convert promise to Python - this will wait for it to resolve
-        result = promise.to_py()
+        # Await the promise to get the resolved value
+        result = await promise
 
         if not result.success:
             raise Exception(f"Failed to load PDF: {result.error}")
@@ -178,11 +176,13 @@ class Document:
         return self.num_pages
 
 
-def open(stream=None, filetype=None):
+async def open(stream=None, filetype=None):
     """Open a PDF document from bytes"""
     if stream is None:
         raise ValueError("stream parameter is required")
-    return Document(stream)
+    doc = Document(stream)
+    await doc._load()
+    return doc
 
 
 # Colorspace constants (for compatibility)
