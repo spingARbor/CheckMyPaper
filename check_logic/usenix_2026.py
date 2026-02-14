@@ -389,7 +389,26 @@ def run_check(uploaded_file):
         import sys
         print(f"DEBUG: File size: {len(file_bytes)} bytes", file=sys.stderr)
 
-        doc = fitz.open(stream=file_bytes, filetype="pdf", filename=uploaded_file.name)
+        # Open the PDF - handle both sync and async wrappers
+        doc_or_coro = fitz.open(stream=file_bytes, filetype="pdf", filename=uploaded_file.name)
+
+        # Check if the result is a coroutine (async wrapper)
+        import inspect
+        if inspect.iscoroutine(doc_or_coro):
+            # Use asyncio to run the coroutine
+            import asyncio
+            try:
+                # Try to get the current event loop
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # No event loop, create a new one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            doc = loop.run_until_complete(doc_or_coro)
+        else:
+            # Synchronous wrapper
+            doc = doc_or_coro
 
         print(f"DEBUG: PDF loaded successfully, {doc.num_pages} pages", file=sys.stderr)
 
