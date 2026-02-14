@@ -143,12 +143,20 @@ def generate_build():
                 print(f"Packed: {filename}")
 
     # 3. 生成 JSON 并注入 HTML
-    files_json = json.dumps(files_dict)
-    
+    # Use ensure_ascii=False to handle Unicode properly
+    # Use separators to minimize whitespace
+    files_json = json.dumps(files_dict, ensure_ascii=False, separators=(',', ':'))
+
+    # CRITICAL: Escape </script> tags in JSON to prevent HTML parser from breaking
+    # The browser's HTML parser will see </script> in the JSON string and think it's
+    # the end of the script tag, even though it's inside a JSON string.
+    # Replace </script> with <\/script> which is valid in both JSON and JavaScript
+    files_json = files_json.replace('</script>', r'<\/script>')
+
     try:
         with open("template.html", "r", encoding="utf-8") as f:
             template = f.read()
-            
+
         final_html = template.replace("{{FILES_JSON}}", files_json)
 
         with open("index.html", "w", encoding="utf-8") as f:
