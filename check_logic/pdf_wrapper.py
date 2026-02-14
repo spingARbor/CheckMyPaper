@@ -157,15 +157,49 @@ class Document:
             # Convert bytes to Uint8Array for JavaScript
             uint8_array = to_js(self.file_bytes)
 
-            # Access pdfBridge from window object
-            # In Pyodide, js gives access to the JavaScript global scope
+            # Debug: Check what's available in js
+            import sys
+            print(f"DEBUG: js object type: {type(js)}", file=sys.stderr)
+            print(f"DEBUG: js dir: {dir(js)[:20]}", file=sys.stderr)  # First 20 attributes
+
+            # Try different ways to access pdfBridge
+            pdfBridge = None
+            error_messages = []
+
+            # Method 1: Direct access
             try:
-                pdfBridge = js.window.pdfBridge
-            except AttributeError:
+                pdfBridge = js.pdfBridge
+                print("DEBUG: Found pdfBridge via js.pdfBridge", file=sys.stderr)
+            except AttributeError as e:
+                error_messages.append(f"js.pdfBridge failed: {e}")
+
+            # Method 2: Via window
+            if pdfBridge is None:
                 try:
-                    pdfBridge = js.pdfBridge
-                except AttributeError:
-                    raise Exception("pdfBridge not found. Please ensure the page has fully loaded.")
+                    pdfBridge = js.window.pdfBridge
+                    print("DEBUG: Found pdfBridge via js.window.pdfBridge", file=sys.stderr)
+                except AttributeError as e:
+                    error_messages.append(f"js.window.pdfBridge failed: {e}")
+
+            # Method 3: Via globalThis
+            if pdfBridge is None:
+                try:
+                    pdfBridge = js.globalThis.pdfBridge
+                    print("DEBUG: Found pdfBridge via js.globalThis.pdfBridge", file=sys.stderr)
+                except AttributeError as e:
+                    error_messages.append(f"js.globalThis.pdfBridge failed: {e}")
+
+            # Method 4: Via self (for workers)
+            if pdfBridge is None:
+                try:
+                    pdfBridge = js.self.pdfBridge
+                    print("DEBUG: Found pdfBridge via js.self.pdfBridge", file=sys.stderr)
+                except AttributeError as e:
+                    error_messages.append(f"js.self.pdfBridge failed: {e}")
+
+            if pdfBridge is None:
+                error_msg = "pdfBridge not found. Tried methods:\n" + "\n".join(error_messages)
+                raise Exception(error_msg)
 
             # Call the async JavaScript function - it returns a Promise
             promise = pdfBridge.loadPdfComplete(uint8_array)
