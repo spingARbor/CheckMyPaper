@@ -31,92 +31,107 @@
 
         // PDF.js Bridge: Expose PDF processing functions to Python
         window.pdfBridge = {
-            // Store loaded PDF document
+            // Store loaded PDF document and all extracted data
             currentPdf: null,
+            pdfData: null,
 
-            // Load PDF from bytes
-            loadPdf: async function(uint8Array) {
+            // Load PDF and extract ALL data at once (returns Promise)
+            loadPdfComplete: async function(uint8Array) {
                 try {
+                    // Load PDF
                     const loadingTask = pdfjsLib.getDocument({data: uint8Array});
                     this.currentPdf = await loadingTask.promise;
-                    return {
+
+                    const numPages = this.currentPdf.numPages;
+                    const pages = [];
+
+                    // Extract all data for all pages
+                    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+                        const page = await this.currentPdf.getPage(pageNum);
+                        const viewport = page.getViewport({scale: 1.0});
+
+                        // Get text content
+                        const textContent = await page.getTextContent();
+
+                        // Group text items into blocks
+                        const blocks = [];
+                        let currentBlock = null;
+
+                        for (const item of textContent.items) {
+                            if (!item.str.trim()) continue;
+
+                            const transform = item.transform;
+                            const x = transform[4];
+                            const y = viewport.height - transform[5];
+                            const width = item.width;
+                            const height = item.height;
+                            const fontSize = Math.sqrt(transform[0] * transform[0] + transform[1] * transform[1]);
+
+                            const textItem = {
+                                text: item.str,
+                                bbox: [x, y - height, x + width, y],
+                                font: item.fontName,
+                                size: fontSize
+                            };
+
+                            // Simple block grouping
+                            if (!currentBlock || Math.abs(currentBlock.bbox[1] - textItem.bbox[1]) > 5) {
+                                if (currentBlock) blocks.push(currentBlock);
+                                currentBlock = {
+                                    bbox: [...textItem.bbox],
+                                    lines: [[textItem]]
+                                };
+                            } else {
+                                currentBlock.bbox[0] = Math.min(currentBlock.bbox[0], textItem.bbox[0]);
+                                currentBlock.bbox[1] = Math.min(currentBlock.bbox[1], textItem.bbox[1]);
+                                currentBlock.bbox[2] = Math.max(currentBlock.bbox[2], textItem.bbox[2]);
+                                currentBlock.bbox[3] = Math.max(currentBlock.bbox[3], textItem.bbox[3]);
+                                currentBlock.lines[currentBlock.lines.length - 1].push(textItem);
+                            }
+                        }
+
+                        if (currentBlock) blocks.push(currentBlock);
+
+                        // Store page data
+                        pages.push({
+                            pageNum: pageNum,
+                            width: viewport.width,
+                            height: viewport.height,
+                            blocks: blocks,
+                            page: page  // Keep reference for pixel rendering
+                        });
+                    }
+
+                    // Store all data
+                    this.pdfData = {
                         success: true,
-                        numPages: this.currentPdf.numPages
+                        numPages: numPages,
+                        pages: pages
                     };
+
+                    return this.pdfData;
+
                 } catch (error) {
-                    return {
+                    this.pdfData = {
                         success: false,
                         error: error.message
                     };
+                    return this.pdfData;
                 }
             },
 
-            // Get page dimensions
-            getPageDimensions: async function(pageNum) {
-                const page = await this.currentPdf.getPage(pageNum);
-                const viewport = page.getViewport({scale: 1.0});
-                return {
-                    width: viewport.width,
-                    height: viewport.height
-                };
-            },
-
-            // Extract text with positions (similar to PyMuPDF's get_text("dict"))
-            getTextContent: async function(pageNum) {
-                const page = await this.currentPdf.getPage(pageNum);
-                const textContent = await page.getTextContent();
-                const viewport = page.getViewport({scale: 1.0});
-
-                // Group text items into blocks (simplified version)
-                const blocks = [];
-                let currentBlock = null;
-
-                for (const item of textContent.items) {
-                    if (!item.str.trim()) continue;
-
-                    const transform = item.transform;
-                    const x = transform[4];
-                    const y = viewport.height - transform[5]; // PDF.js uses bottom-left origin
-                    const width = item.width;
-                    const height = item.height;
-                    const fontSize = Math.sqrt(transform[0] * transform[0] + transform[1] * transform[1]);
-
-                    const textItem = {
-                        text: item.str,
-                        bbox: [x, y - height, x + width, y],
-                        font: item.fontName,
-                        size: fontSize
-                    };
-
-                    // Simple block grouping: items close together vertically
-                    if (!currentBlock || Math.abs(currentBlock.bbox[1] - textItem.bbox[1]) > 5) {
-                        if (currentBlock) blocks.push(currentBlock);
-                        currentBlock = {
-                            bbox: [...textItem.bbox],
-                            lines: [[textItem]]
-                        };
-                    } else {
-                        // Extend block bbox
-                        currentBlock.bbox[0] = Math.min(currentBlock.bbox[0], textItem.bbox[0]);
-                        currentBlock.bbox[1] = Math.min(currentBlock.bbox[1], textItem.bbox[1]);
-                        currentBlock.bbox[2] = Math.max(currentBlock.bbox[2], textItem.bbox[2]);
-                        currentBlock.bbox[3] = Math.max(currentBlock.bbox[3], textItem.bbox[3]);
-                        currentBlock.lines[currentBlock.lines.length - 1].push(textItem);
-                    }
+            // Get stored page data (synchronous access)
+            getPageData: function(pageNum) {
+                if (!this.pdfData || !this.pdfData.pages) {
+                    throw new Error("PDF not loaded");
                 }
-
-                if (currentBlock) blocks.push(currentBlock);
-
-                return {
-                    width: viewport.width,
-                    height: viewport.height,
-                    blocks: blocks
-                };
+                return this.pdfData.pages[pageNum - 1];
             },
 
-            // Render page region to get pixel data (for spacing analysis)
+            // Render page region to get pixel data (still async, but called on-demand)
             getPixelData: async function(pageNum, x, y, width, height) {
-                const page = await this.currentPdf.getPage(pageNum);
+                const pageData = this.pdfData.pages[pageNum - 1];
+                const page = pageData.page;
                 const viewport = page.getViewport({scale: 1.0});
 
                 // Create canvas
@@ -125,17 +140,28 @@
                 canvas.width = Math.ceil(width);
                 canvas.height = Math.ceil(height);
 
-                // Render with offset
-                const renderViewport = page.getViewport({
-                    scale: 1.0,
-                    offsetX: -x,
-                    offsetY: -(viewport.height - y - height)
-                });
+                // Render the full page first
+                const tempCanvas = document.createElement('canvas');
+                const tempContext = tempCanvas.getContext('2d');
+                tempCanvas.width = viewport.width;
+                tempCanvas.height = viewport.height;
 
                 await page.render({
-                    canvasContext: context,
-                    viewport: renderViewport
+                    canvasContext: tempContext,
+                    viewport: viewport
                 }).promise;
+
+                // Extract the region
+                const sourceX = Math.floor(x);
+                const sourceY = Math.floor(y);
+                const sourceWidth = Math.min(Math.ceil(width), viewport.width - sourceX);
+                const sourceHeight = Math.min(Math.ceil(height), viewport.height - sourceY);
+
+                context.drawImage(
+                    tempCanvas,
+                    sourceX, sourceY, sourceWidth, sourceHeight,
+                    0, 0, sourceWidth, sourceHeight
+                );
 
                 // Get grayscale pixel data
                 const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
@@ -145,7 +171,6 @@
                     const r = imageData.data[i * 4];
                     const g = imageData.data[i * 4 + 1];
                     const b = imageData.data[i * 4 + 2];
-                    // Convert to grayscale
                     pixels[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
                 }
 

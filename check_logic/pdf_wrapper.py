@@ -4,16 +4,15 @@ Provides a PyMuPDF-like API using PDF.js in the browser
 """
 import js
 from pyodide.ffi import to_js
-import asyncio
 
 
 class Rect:
     """Simple rectangle class compatible with PyMuPDF's Rect"""
     def __init__(self, x0, y0, x1, y1):
-        self.x0 = x0
-        self.y0 = y0
-        self.x1 = x1
-        self.y1 = y1
+        self.x0 = float(x0)
+        self.y0 = float(y0)
+        self.x1 = float(x1)
+        self.y1 = float(y1)
 
     @property
     def width(self):
@@ -27,25 +26,25 @@ class Rect:
 class Pixmap:
     """Pixmap class for pixel data"""
     def __init__(self, width, height, pixels):
-        self.width = width
-        self.height = height
+        self.width = int(width)
+        self.height = int(height)
         self.samples = bytes(pixels)
 
 
 class Page:
     """Page wrapper that uses PDF.js"""
-    def __init__(self, doc, page_num):
+    def __init__(self, doc, page_num, page_data):
         self.doc = doc
         self.page_num = page_num
+        self._page_data = page_data
         self._rect = None
 
     @property
     def rect(self):
         if self._rect is None:
-            # Get page dimensions synchronously (cached)
-            dims = self.doc._page_dimensions.get(self.page_num)
-            if dims:
-                self._rect = Rect(0, 0, dims['width'], dims['height'])
+            w = float(self._page_data['width'])
+            h = float(self._page_data['height'])
+            self._rect = Rect(0, 0, w, h)
         return self._rect
 
     def get_text(self, mode="dict"):
@@ -53,29 +52,34 @@ class Page:
         if mode != "dict":
             raise NotImplementedError(f"Mode '{mode}' not supported")
 
-        # Get cached text content
-        text_data = self.doc._text_content.get(self.page_num, {})
-
-        # Convert to PyMuPDF-like format
+        # Convert JavaScript data to Python format
         blocks = []
-        for block_data in text_data.get('blocks', []):
+        js_blocks = self._page_data['blocks']
+
+        for i in range(len(js_blocks)):
+            block_data = js_blocks[i]
+            bbox_js = block_data['bbox']
             block = {
-                'bbox': tuple(block_data['bbox']),
+                'bbox': (float(bbox_js[0]), float(bbox_js[1]), float(bbox_js[2]), float(bbox_js[3])),
                 'lines': []
             }
 
-            for line_items in block_data['lines']:
+            lines_js = block_data['lines']
+            for j in range(len(lines_js)):
+                line_items = lines_js[j]
                 line = {
                     'bbox': self._calculate_line_bbox(line_items),
                     'spans': []
                 }
 
-                for item in line_items:
+                for k in range(len(line_items)):
+                    item = line_items[k]
+                    bbox_js = item['bbox']
                     span = {
-                        'text': item['text'],
-                        'bbox': tuple(item['bbox']),
-                        'font': item['font'],
-                        'size': item['size']
+                        'text': str(item['text']),
+                        'bbox': (float(bbox_js[0]), float(bbox_js[1]), float(bbox_js[2]), float(bbox_js[3])),
+                        'font': str(item['font']),
+                        'size': float(item['size'])
                     }
                     line['spans'].append(span)
 
@@ -84,40 +88,53 @@ class Page:
             blocks.append(block)
 
         return {
-            'width': text_data.get('width', 0),
-            'height': text_data.get('height', 0),
+            'width': float(self._page_data['width']),
+            'height': float(self._page_data['height']),
             'blocks': blocks
         }
 
     def _calculate_line_bbox(self, items):
         """Calculate bounding box for a line of text items"""
-        if not items:
-            return (0, 0, 0, 0)
-        x0 = min(item['bbox'][0] for item in items)
-        y0 = min(item['bbox'][1] for item in items)
-        x1 = max(item['bbox'][2] for item in items)
-        y1 = max(item['bbox'][3] for item in items)
-        return (x0, y0, x1, y1)
+        if len(items) == 0:
+            return (0.0, 0.0, 0.0, 0.0)
+
+        x0_vals = []
+        y0_vals = []
+        x1_vals = []
+        y1_vals = []
+
+        for i in range(len(items)):
+            bbox = items[i]['bbox']
+            x0_vals.append(float(bbox[0]))
+            y0_vals.append(float(bbox[1]))
+            x1_vals.append(float(bbox[2]))
+            y1_vals.append(float(bbox[3]))
+
+        return (min(x0_vals), min(y0_vals), max(x1_vals), max(y1_vals))
 
     def get_pixmap(self, clip=None, colorspace=None, alpha=False):
         """Get pixel data for a region"""
         if clip is None:
             clip = self.rect
 
-        # Call JavaScript bridge to get pixel data
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(
-            js.pdfBridge.getPixelData(
-                self.page_num,
-                clip.x0, clip.y0,
-                clip.width, clip.height
-            )
+        # Call JavaScript bridge - it returns a Promise
+        # Use to_py() to wait for the promise to resolve
+        promise = js.pdfBridge.getPixelData(
+            self.page_num,
+            clip.x0, clip.y0,
+            clip.width, clip.height
         )
+
+        # Convert promise to Python - this will wait for it to resolve
+        result = promise.to_py()
+
+        pixels_js = result.pixels
+        pixels_list = [int(pixels_js[i]) for i in range(len(pixels_js))]
 
         return Pixmap(
             result.width,
             result.height,
-            list(result.pixels)
+            pixels_list
         )
 
 
@@ -127,8 +144,7 @@ class Document:
         self.file_bytes = file_bytes
         self.num_pages = 0
         self._pages = []
-        self._page_dimensions = {}
-        self._text_content = {}
+        self._pdf_data = None
         self._load()
 
     def _load(self):
@@ -136,38 +152,23 @@ class Document:
         # Convert bytes to Uint8Array for JavaScript
         uint8_array = to_js(self.file_bytes)
 
-        # Load PDF
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(js.pdfBridge.loadPdf(uint8_array))
+        # Call the async JavaScript function - it returns a Promise
+        promise = js.pdfBridge.loadPdfComplete(uint8_array)
+
+        # Convert promise to Python - this will wait for it to resolve
+        result = promise.to_py()
 
         if not result.success:
             raise Exception(f"Failed to load PDF: {result.error}")
 
-        self.num_pages = result.numPages
+        self._pdf_data = result
+        self.num_pages = int(result.numPages)
 
-        # Pre-load all page dimensions and text content
-        for page_num in range(1, self.num_pages + 1):
-            # Get dimensions
-            dims = loop.run_until_complete(
-                js.pdfBridge.getPageDimensions(page_num)
-            )
-            self._page_dimensions[page_num] = {
-                'width': dims.width,
-                'height': dims.height
-            }
-
-            # Get text content
-            text_data = loop.run_until_complete(
-                js.pdfBridge.getTextContent(page_num)
-            )
-            self._text_content[page_num] = {
-                'width': text_data.width,
-                'height': text_data.height,
-                'blocks': [dict(b) for b in text_data.blocks]
-            }
-
-            # Create page object
-            self._pages.append(Page(self, page_num))
+        # Create page objects
+        pages_js = result.pages
+        for i in range(len(pages_js)):
+            page_data = pages_js[i]
+            self._pages.append(Page(self, int(page_data.pageNum), page_data))
 
     def __iter__(self):
         """Iterate over pages"""
