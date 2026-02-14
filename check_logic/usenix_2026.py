@@ -3,19 +3,23 @@ try:
     from check_logic import pdf_wrapper_preprocessed as fitz
 except ImportError:
     try:
-        # Try to use async wrapper (for Stlite/browser environment with Worker)
-        from check_logic import pdf_wrapper_async as fitz
+        # Try to use sync wrapper (for Stlite/browser environment with Worker - synchronous API)
+        from check_logic import pdf_wrapper_sync as fitz
     except ImportError:
         try:
-            # Try to use component-based wrapper (for Stlite/browser environment)
-            from check_logic import pdf_wrapper_component as fitz
+            # Try to use async wrapper (for Stlite/browser environment with Worker)
+            from check_logic import pdf_wrapper_async as fitz
         except ImportError:
             try:
-                # Try to use PDF.js wrapper (for browser/Pyodide environment)
-                from check_logic import pdf_wrapper as fitz
+                # Try to use component-based wrapper (for Stlite/browser environment)
+                from check_logic import pdf_wrapper_component as fitz
             except ImportError:
-                # Fallback to PyMuPDF (for local testing)
-                import pymupdf as fitz
+                try:
+                    # Try to use PDF.js wrapper (for browser/Pyodide environment)
+                    from check_logic import pdf_wrapper as fitz
+                except ImportError:
+                    # Fallback to PyMuPDF (for local testing)
+                    import pymupdf as fitz
 
 import re
 from collections import defaultdict
