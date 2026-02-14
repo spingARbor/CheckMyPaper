@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# MacOS
+.DS_Store
+
+# Generated Files (虽然通常忽略，但对于 gh-pages 部署，我们在 CI 中生成，本地可以保留或忽略)
+# index.html 
+# 如果你不想手动提交 build 后的 html，可以取消上面这行的注释
+
+# Test Data
+*.pdf
