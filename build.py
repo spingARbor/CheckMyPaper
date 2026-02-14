@@ -69,7 +69,7 @@ if uploaded_file and selected_conf:
                 # 注意：文件指针在读取后需要重置，但 fitz.open(stream=...) 处理字节流，这里传递 file object
                 uploaded_file.seek(0)
                 try:
-                    results = await checker_module.run_check(uploaded_file)
+                    results = checker_module.run_check(uploaded_file)
                 except Exception as e:
                     import traceback
                     results = {
