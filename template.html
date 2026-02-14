@@ -213,9 +213,9 @@
                     if (event.source && event.source.postMessage) {
                         event.source.postMessage(response, '*');
                         console.log('Sent response via event.source');
-                    } else if (stliteWorker && stliteWorker.postMessage) {
-                        stliteWorker.postMessage(response);
-                        console.log('Sent response via stliteWorker');
+                    } else if (window.stliteWorker && window.stliteWorker.postMessage) {
+                        window.stliteWorker.postMessage(response);
+                        console.log('Sent response via window.stliteWorker');
                     } else if (event.ports && event.ports[0]) {
                         event.ports[0].postMessage(response);
                         console.log('Sent response via event.ports');
@@ -235,8 +235,8 @@
 
                     if (event.source && event.source.postMessage) {
                         event.source.postMessage(errorResponse, '*');
-                    } else if (stliteWorker && stliteWorker.postMessage) {
-                        stliteWorker.postMessage(errorResponse);
+                    } else if (window.stliteWorker && window.stliteWorker.postMessage) {
+                        window.stliteWorker.postMessage(errorResponse);
                     }
                 }
             }
@@ -264,8 +264,8 @@
 
                     if (event.source && event.source.postMessage) {
                         event.source.postMessage(response, '*');
-                    } else if (stliteWorker && stliteWorker.postMessage) {
-                        stliteWorker.postMessage(response);
+                    } else if (window.stliteWorker && window.stliteWorker.postMessage) {
+                        window.stliteWorker.postMessage(response);
                     }
                 } catch (error) {
                     console.error('Error getting pixel data:', error);
@@ -278,8 +278,8 @@
 
                     if (event.source && event.source.postMessage) {
                         event.source.postMessage(errorResponse, '*');
-                    } else if (stliteWorker && stliteWorker.postMessage) {
-                        stliteWorker.postMessage(errorResponse);
+                    } else if (window.stliteWorker && window.stliteWorker.postMessage) {
+                        window.stliteWorker.postMessage(errorResponse);
                     }
                 }
             }
@@ -340,13 +340,15 @@
                             console.log('PDF preprocessed successfully:', file.name);
 
                             // Send the preprocessed data to the Stlite worker
-                            if (stliteWorker && stliteWorker.postMessage) {
-                                stliteWorker.postMessage({
+                            if (window.stliteWorker && window.stliteWorker.postMessage) {
+                                window.stliteWorker.postMessage({
                                     type: 'PREPROCESSED_PDF_DATA',
                                     filename: file.name,
                                     data: result
                                 });
                                 console.log('Sent preprocessed data to worker:', file.name);
+                            } else {
+                                console.warn('Worker not available, data stored in window.preprocessedPDFs only');
                             }
                         } else {
                             console.error('PDF preprocessing failed:', result.error);
@@ -362,19 +364,25 @@
         setTimeout(setupFileUploadInterceptor, 1000);
 
         // Store reference to Stlite instance for worker communication
-        let stliteWorker = null;
+        window.stliteWorker = null;
 
         stlite.mount({
             requirements: [],  // No Python dependencies needed - using PDF.js
             entrypoint: "main.py",
             files: {{FILES_JSON}},
         }, document.getElementById("root")).then((instance) => {
-            console.log('Stlite mounted successfully');
-            // Store worker reference if available
-            if (instance && instance._worker) {
-                stliteWorker = instance._worker;
-                console.log('Stlite worker reference stored');
+            console.log('Stlite mounted successfully', instance);
+            // Try to get worker reference from various possible locations
+            if (instance) {
+                window.stliteWorker = instance._worker || instance.worker || instance._pyodideWorker || null;
+                if (window.stliteWorker) {
+                    console.log('Stlite worker reference stored');
+                } else {
+                    console.warn('Could not find worker reference in instance:', Object.keys(instance));
+                }
             }
+        }).catch((error) => {
+            console.error('Stlite mount error:', error);
         });
 
         // Hide loading message after a short delay
