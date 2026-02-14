@@ -44,19 +44,19 @@ ALLOWED_AREA = (
 # 2. 辅助工具函数
 # ==========================================
 
-def count_lines(page, rect, invert=False, stop=30):
+async def count_lines(page, rect, invert=False, stop=30):
     """通过像素分析计算空白行数 (核心黑科技)"""
     try:
         # 获取灰度位图
-        pix = page.get_pixmap(clip=rect, colorspace=fitz.csGRAY, alpha=False)
+        pix = await page.get_pixmap(clip=rect, colorspace=fitz.csGRAY, alpha=False)
         w, h, pixels = pix.width, pix.height, pix.samples
-        
+
         # 将字节流转换为行数据
         lines = [pixels[offset:offset + w] for offset in range(0, w * h, w)]
-        
+
         if invert:
             lines = lines[::-1]
-            
+
         white_lines = 0
         for line in lines:
             if white_lines > stop:
@@ -65,7 +65,7 @@ def count_lines(page, rect, invert=False, stop=30):
             if sum([1 for i in range(w) if line[i] > 200]) >= w:
                 white_lines += 1
             # else: break # 严格模式下遇到黑点即停，这里保持原逻辑松散检查
-            
+
         if len(lines) < stop and white_lines == len(lines):
             return stop
         return white_lines
@@ -165,7 +165,7 @@ def find_margins(doc, start=1):
                     })
     return violations
 
-def find_sections(doc, start=1):
+async def find_sections(doc, start=1):
     violations = []
 
     for page in doc:
@@ -176,7 +176,7 @@ def find_sections(doc, start=1):
         text_dict = page.get_text("dict")
         for block in text_dict["blocks"]:
             if "lines" not in block: continue
-            
+
             # 筛选可能是标题的文本 (根据字号)
             potential_section_items = []
             for line in block["lines"]:
@@ -187,11 +187,11 @@ def find_sections(doc, start=1):
 
             if potential_section_items:
                 joined_text = " ".join(span["text"] for span in potential_section_items)
-                
+
                 # 区分 Section 和 Subsection
                 req_below = 0
                 req_above = 0
-                
+
                 if re.match(r"\d+ ", joined_text): # "1 Introduction"
                     req_below = REQ_SPACING_SECTION
                     req_above = REQ_SPACING_SECTION_ABOVE
@@ -210,8 +210,8 @@ def find_sections(doc, start=1):
 
                 # 检查下方间距
                 rect_below = fitz.Rect(x0, y1 + 1, x1, y1 + int(req_below))
-                lines_below = count_lines(page, rect_below, stop=int(req_below))
-                
+                lines_below = await count_lines(page, rect_below, stop=int(req_below))
+
                 if lines_below < int(req_below):
                     violations.append({
                         "type": f"Spacing BELOW section too small (Found {lines_below}px, Need {int(req_below)}px)",
@@ -221,8 +221,8 @@ def find_sections(doc, start=1):
 
                 # 检查上方间距
                 rect_above = fitz.Rect(x0, y0 - int(req_above), x1, y0 - 1)
-                lines_above = count_lines(page, rect_above, invert=True, stop=int(req_above))
-                
+                lines_above = await count_lines(page, rect_above, invert=True, stop=int(req_above))
+
                 if lines_above < int(req_above):
                     violations.append({
                         "type": f"Spacing ABOVE section too small (Found {lines_above}px, Need {int(req_above)}px)",
@@ -231,7 +231,7 @@ def find_sections(doc, start=1):
                     })
     return violations
 
-def find_captions(doc, start=1):
+async def find_captions(doc, start=1):
     violations = []
 
     for page in doc:
@@ -242,10 +242,10 @@ def find_captions(doc, start=1):
         text_dict = page.get_text("dict")
         for block in text_dict["blocks"]:
             if "lines" not in block: continue
-            
+
             caption_items = []
             is_caption = False
-            
+
             # 简化的 Caption 提取逻辑
             for line in block["lines"]:
                 for span in line["spans"]:
@@ -270,8 +270,8 @@ def find_captions(doc, start=1):
 
                 # 检查 Caption 上方间距 (通常用于 Table)
                 rect_above = fitz.Rect(x0, y0 - CAPTION_LINES_ABOVE, x1, y0 - 1)
-                lines_above = count_lines(page, rect_above, True, stop=10)
-                
+                lines_above = await count_lines(page, rect_above, True, stop=10)
+
                 if lines_above < CAPTION_LINES_ABOVE:
                      violations.append({
                         "type": f"Spacing ABOVE caption too small",
@@ -282,7 +282,7 @@ def find_captions(doc, start=1):
                 # 检查 Caption 下方间距
                 if CAPTION_LINES_BELOW > 0:
                     rect_below = fitz.Rect(x0, y1 + 3, x1, y1 + CAPTION_LINES_BELOW - 2)
-                    lines_below = count_lines(page, rect_below, False, stop=10)
+                    lines_below = await count_lines(page, rect_below, False, stop=10)
                     if lines_below < CAPTION_LINES_BELOW:
                          violations.append({
                             "type": f"Spacing BELOW caption too small",
@@ -365,29 +365,29 @@ def font_stats(doc, start=1):
 # 4. 主入口函数 (供 Stlite 调用)
 # ==========================================
 
-def run_check(uploaded_file):
+async def run_check(uploaded_file):
     """
     接收 Streamlit UploadedFile 对象，返回检测结果字典
     """
     try:
         # 读取文件流
         file_bytes = uploaded_file.read()
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        
+        doc = await fitz.open(stream=file_bytes, filetype="pdf")
+
         all_violations = []
-        
+
         # 1. 页边距检查
         all_violations.extend(find_margins(doc, start=1))
-        
+
         # 2. 章节间距检查
-        all_violations.extend(find_sections(doc, start=1))
-        
+        all_violations.extend(await find_sections(doc, start=1))
+
         # 3. 标题间距检查
-        all_violations.extend(find_captions(doc, start=1))
-        
+        all_violations.extend(await find_captions(doc, start=1))
+
         # 4. 附录完整性检查
         all_violations.extend(find_appendices(doc, start=1))
-        
+
         # 5. 字体检查
         all_violations.extend(font_stats(doc, start=1))
 
@@ -396,7 +396,7 @@ def run_check(uploaded_file):
             "status": "finished",
             "violations": all_violations
         }
-        
+
     except Exception as e:
         return {
             "status": "error",
