@@ -185,6 +185,76 @@
         // Store for pre-processed PDF data
         window.preprocessedPDFs = {};
 
+        // Message handler for Worker communication
+        // Listen for messages from the Stlite worker requesting PDF processing
+        window.addEventListener('message', async (event) => {
+            const data = event.data;
+
+            // Handle PROCESS_PDF requests from worker
+            if (data && data.type === 'PROCESS_PDF') {
+                console.log('Received PROCESS_PDF request from worker:', data.requestId);
+
+                try {
+                    // Convert pdfData array back to Uint8Array
+                    const uint8Array = new Uint8Array(data.pdfData);
+
+                    // Process PDF using pdfBridge
+                    const result = await window.pdfBridge.loadPdfComplete(uint8Array);
+
+                    // Send response back to worker
+                    event.source.postMessage({
+                        type: 'PROCESS_PDF_RESPONSE',
+                        requestId: data.requestId,
+                        success: result.success,
+                        data: result.success ? result : null,
+                        error: result.success ? null : result.error
+                    }, '*');
+
+                    console.log('Sent PROCESS_PDF response:', data.requestId, result.success);
+                } catch (error) {
+                    console.error('Error processing PDF:', error);
+                    event.source.postMessage({
+                        type: 'PROCESS_PDF_RESPONSE',
+                        requestId: data.requestId,
+                        success: false,
+                        error: error.message
+                    }, '*');
+                }
+            }
+
+            // Handle GET_PIXEL_DATA requests from worker
+            if (data && data.type === 'GET_PIXEL_DATA') {
+                console.log('Received GET_PIXEL_DATA request from worker:', data.requestId);
+
+                try {
+                    // Get pixel data using pdfBridge
+                    const pixelData = await window.pdfBridge.getPixelData(
+                        data.pageNum,
+                        data.x,
+                        data.y,
+                        data.width,
+                        data.height
+                    );
+
+                    // Send response back to worker
+                    event.source.postMessage({
+                        type: 'GET_PIXEL_DATA_RESPONSE',
+                        requestId: data.requestId,
+                        success: true,
+                        data: pixelData
+                    }, '*');
+                } catch (error) {
+                    console.error('Error getting pixel data:', error);
+                    event.source.postMessage({
+                        type: 'GET_PIXEL_DATA_RESPONSE',
+                        requestId: data.requestId,
+                        success: false,
+                        error: error.message
+                    }, '*');
+                }
+            }
+        });
+
         // Intercept file uploads and preprocess PDFs
         function setupFileUploadInterceptor() {
             // Use MutationObserver to detect when Streamlit creates file upload inputs
