@@ -65,10 +65,10 @@ if uploaded_file and selected_conf:
         
         if st.button(f"开始检查 ({selected_conf})", type="primary"):
             with st.spinner("正在本地分析文档结构 (这可能需要几秒钟)..."):
-                # 调用核心检查函数 (使用 asyncio 运行异步函数)
+                # 调用核心检查函数 (使用 await 直接调用异步函数)
                 # 注意：文件指针在读取后需要重置，但 fitz.open(stream=...) 处理字节流，这里传递 file object
                 uploaded_file.seek(0)
-                results = asyncio.run(checker_module.run_check(uploaded_file))
+                results = await checker_module.run_check(uploaded_file)
             
             # --- 结果展示逻辑 ---
             if results["status"] == "error":
