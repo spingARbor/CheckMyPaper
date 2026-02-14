@@ -182,6 +182,77 @@
             }
         };
 
+        // Message handler for iframe communication
+        window.addEventListener('message', async function(event) {
+            // Security: In production, check event.origin
+            if (event.data.type === 'PDF_PROCESS_REQUEST') {
+                try {
+                    const pdfData = event.data.pdfData;
+                    const uint8Array = new Uint8Array(pdfData);
+
+                    // Process PDF using pdfBridge
+                    const result = await window.pdfBridge.loadPdfComplete(uint8Array);
+
+                    // Send result back to iframe
+                    event.source.postMessage({
+                        type: 'PDF_PROCESS_RESPONSE',
+                        requestId: event.data.requestId,
+                        success: true,
+                        data: {
+                            success: result.success,
+                            numPages: result.numPages,
+                            pages: Array.from(result.pages).map(page => ({
+                                pageNum: page.pageNum,
+                                width: page.width,
+                                height: page.height,
+                                blocks: Array.from(page.blocks).map(block => ({
+                                    bbox: Array.from(block.bbox),
+                                    lines: Array.from(block.lines).map(line =>
+                                        Array.from(line).map(item => ({
+                                            text: item.text,
+                                            bbox: Array.from(item.bbox),
+                                            font: item.font,
+                                            size: item.size
+                                        }))
+                                    )
+                                }))
+                            }))
+                        }
+                    }, '*');
+                } catch (error) {
+                    event.source.postMessage({
+                        type: 'PDF_PROCESS_RESPONSE',
+                        requestId: event.data.requestId,
+                        success: false,
+                        error: error.message
+                    }, '*');
+                }
+            } else if (event.data.type === 'PDF_RENDER_REQUEST') {
+                try {
+                    const { pageNum, x, y, width, height } = event.data;
+                    const result = await window.pdfBridge.getPixelData(pageNum, x, y, width, height);
+
+                    event.source.postMessage({
+                        type: 'PDF_RENDER_RESPONSE',
+                        requestId: event.data.requestId,
+                        success: true,
+                        data: {
+                            width: result.width,
+                            height: result.height,
+                            pixels: Array.from(result.pixels)
+                        }
+                    }, '*');
+                } catch (error) {
+                    event.source.postMessage({
+                        type: 'PDF_RENDER_RESPONSE',
+                        requestId: event.data.requestId,
+                        success: false,
+                        error: error.message
+                    }, '*');
+                }
+            }
+        });
+
         stlite.mount({
             requirements: [],  // No Python dependencies needed - using PDF.js
             entrypoint: "main.py",
