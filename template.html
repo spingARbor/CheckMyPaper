@@ -16,18 +16,153 @@
 <body>
     <div id="loading">正在初始化隐私沙盒环境...<br>(首次加载约需 10-20秒)</div>
     <div id="root"></div>
-    
+
+    <!-- PDF.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // Configure PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+
     <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.50.0/build/stlite.js"></script>
     
     <script>
         const loadingDiv = document.getElementById("loading");
-        
+
+        // PDF.js Bridge: Expose PDF processing functions to Python
+        window.pdfBridge = {
+            // Store loaded PDF document
+            currentPdf: null,
+
+            // Load PDF from bytes
+            loadPdf: async function(uint8Array) {
+                try {
+                    const loadingTask = pdfjsLib.getDocument({data: uint8Array});
+                    this.currentPdf = await loadingTask.promise;
+                    return {
+                        success: true,
+                        numPages: this.currentPdf.numPages
+                    };
+                } catch (error) {
+                    return {
+                        success: false,
+                        error: error.message
+                    };
+                }
+            },
+
+            // Get page dimensions
+            getPageDimensions: async function(pageNum) {
+                const page = await this.currentPdf.getPage(pageNum);
+                const viewport = page.getViewport({scale: 1.0});
+                return {
+                    width: viewport.width,
+                    height: viewport.height
+                };
+            },
+
+            // Extract text with positions (similar to PyMuPDF's get_text("dict"))
+            getTextContent: async function(pageNum) {
+                const page = await this.currentPdf.getPage(pageNum);
+                const textContent = await page.getTextContent();
+                const viewport = page.getViewport({scale: 1.0});
+
+                // Group text items into blocks (simplified version)
+                const blocks = [];
+                let currentBlock = null;
+
+                for (const item of textContent.items) {
+                    if (!item.str.trim()) continue;
+
+                    const transform = item.transform;
+                    const x = transform[4];
+                    const y = viewport.height - transform[5]; // PDF.js uses bottom-left origin
+                    const width = item.width;
+                    const height = item.height;
+                    const fontSize = Math.sqrt(transform[0] * transform[0] + transform[1] * transform[1]);
+
+                    const textItem = {
+                        text: item.str,
+                        bbox: [x, y - height, x + width, y],
+                        font: item.fontName,
+                        size: fontSize
+                    };
+
+                    // Simple block grouping: items close together vertically
+                    if (!currentBlock || Math.abs(currentBlock.bbox[1] - textItem.bbox[1]) > 5) {
+                        if (currentBlock) blocks.push(currentBlock);
+                        currentBlock = {
+                            bbox: [...textItem.bbox],
+                            lines: [[textItem]]
+                        };
+                    } else {
+                        // Extend block bbox
+                        currentBlock.bbox[0] = Math.min(currentBlock.bbox[0], textItem.bbox[0]);
+                        currentBlock.bbox[1] = Math.min(currentBlock.bbox[1], textItem.bbox[1]);
+                        currentBlock.bbox[2] = Math.max(currentBlock.bbox[2], textItem.bbox[2]);
+                        currentBlock.bbox[3] = Math.max(currentBlock.bbox[3], textItem.bbox[3]);
+                        currentBlock.lines[currentBlock.lines.length - 1].push(textItem);
+                    }
+                }
+
+                if (currentBlock) blocks.push(currentBlock);
+
+                return {
+                    width: viewport.width,
+                    height: viewport.height,
+                    blocks: blocks
+                };
+            },
+
+            // Render page region to get pixel data (for spacing analysis)
+            getPixelData: async function(pageNum, x, y, width, height) {
+                const page = await this.currentPdf.getPage(pageNum);
+                const viewport = page.getViewport({scale: 1.0});
+
+                // Create canvas
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = Math.ceil(width);
+                canvas.height = Math.ceil(height);
+
+                // Render with offset
+                const renderViewport = page.getViewport({
+                    scale: 1.0,
+                    offsetX: -x,
+                    offsetY: -(viewport.height - y - height)
+                });
+
+                await page.render({
+                    canvasContext: context,
+                    viewport: renderViewport
+                }).promise;
+
+                // Get grayscale pixel data
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                const pixels = new Uint8Array(canvas.width * canvas.height);
+
+                for (let i = 0; i < pixels.length; i++) {
+                    const r = imageData.data[i * 4];
+                    const g = imageData.data[i * 4 + 1];
+                    const b = imageData.data[i * 4 + 2];
+                    // Convert to grayscale
+                    pixels[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+                }
+
+                return {
+                    width: canvas.width,
+                    height: canvas.height,
+                    pixels: Array.from(pixels)
+                };
+            }
+        };
+
         stlite.mount({
-            requirements: ["pymupdf"],  // 关键依赖：PyMuPDF
-            entrypoint: "main.py",      // 入口文件
-            files: {{FILES_JSON}},      // Python代码将注入此处
+            requirements: [],  // No Python dependencies needed - using PDF.js
+            entrypoint: "main.py",
+            files: {{FILES_JSON}},
         }, document.getElementById("root")).then(() => {
-            loadingDiv.style.display = 'none'; // 加载完成后隐藏提示
+            loadingDiv.style.display = 'none';
         });
     </script>
 </body>

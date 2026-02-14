@@ -1,4 +1,10 @@
-import pymupdf as fitz
+try:
+    # Try to use PDF.js wrapper (for browser/Pyodide environment)
+    from check_logic import pdf_wrapper as fitz
+except ImportError:
+    # Fallback to PyMuPDF (for local testing)
+    import pymupdf as fitz
+
 import re
 from collections import defaultdict
 
@@ -38,7 +44,7 @@ ALLOWED_AREA = (
 # 2. 辅助工具函数
 # ==========================================
 
-def count_lines(page: fitz.Page, rect: fitz.Rect, invert=False, stop=30):
+def count_lines(page, rect, invert=False, stop=30):
     """通过像素分析计算空白行数 (核心黑科技)"""
     try:
         # 获取灰度位图
@@ -88,10 +94,14 @@ def excess_area(allowed, bbox):
 # 3. 具体检查逻辑函数
 # ==========================================
 
-def find_margins(doc: fitz.Document, start=1):
+def find_margins(doc, start=1):
     violations = []
-    
-    for page_num, page in enumerate(doc, start=start):
+
+    for page in doc:
+        page_num = page.page_num
+        if page_num < start:
+            continue
+
         # 1. 检查页面物理尺寸
         if page_num == 1:
             if abs(page.rect.width - TOTAL_WIDTH) > 1 or abs(page.rect.height - TOTAL_HEIGHT) > 1:
@@ -155,12 +165,14 @@ def find_margins(doc: fitz.Document, start=1):
                     })
     return violations
 
-def find_sections(doc: fitz.Document, start=1):
+def find_sections(doc, start=1):
     violations = []
-    
-    for page_num, page in enumerate(doc, start=start):
-        if page_num == 1: continue # 跳过首页
-        
+
+    for page in doc:
+        page_num = page.page_num
+        if page_num < start or page_num == 1:
+            continue  # 跳过首页
+
         text_dict = page.get_text("dict")
         for block in text_dict["blocks"]:
             if "lines" not in block: continue
@@ -219,11 +231,13 @@ def find_sections(doc: fitz.Document, start=1):
                     })
     return violations
 
-def find_captions(doc: fitz.Document, start=1):
+def find_captions(doc, start=1):
     violations = []
-    
-    for page_num, page in enumerate(doc, start=start):
-        if page_num == 1: continue
+
+    for page in doc:
+        page_num = page.page_num
+        if page_num < start or page_num == 1:
+            continue
 
         text_dict = page.get_text("dict")
         for block in text_dict["blocks"]:
@@ -277,11 +291,15 @@ def find_captions(doc: fitz.Document, start=1):
                         })
     return violations
 
-def find_appendices(doc: fitz.Document, start=1):
+def find_appendices(doc, start=1):
     found = {"Ethical": False, "Ethics": False, "Open": False}
     found_pages = {"Ethical": None, "Ethics": None, "Open": None}
 
-    for page_num, page in enumerate(doc, start=start):
+    for page in doc:
+        page_num = page.page_num
+        if page_num < start:
+            continue
+
         text_dict = page.get_text("dict")
         for block in text_dict["blocks"]:
              texts = [span["text"].lower() for line in block.get("lines", []) for span in line["spans"]]
@@ -310,11 +328,15 @@ def find_appendices(doc: fitz.Document, start=1):
         
     return violations
 
-def font_stats(doc: fitz.Document, start=1):
+def font_stats(doc, start=1):
     stats = defaultdict(int)
     total_len = 0
-    
+
     for page in doc:
+        page_num = page.page_num
+        if page_num < start:
+            continue
+
         for block in page.get_text("dict")["blocks"]:
             if "lines" not in block: continue
             for line in block["lines"]:
