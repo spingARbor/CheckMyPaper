@@ -182,59 +182,79 @@
             }
         };
 
-        // Message handler for iframe communication
+        // Store for pre-processed PDF data
+        window.pdfDataStore = {};
+
+        // Message handler for Worker communication
         window.addEventListener('message', async function(event) {
-            // Security: In production, check event.origin
-            if (event.data.type === 'PDF_PROCESS_REQUEST') {
+            // Handle requests from Pyodide Worker
+            if (event.data.type === 'PROCESS_PDF') {
                 try {
-                    const pdfData = event.data.pdfData;
+                    const { requestId, filename, pdfData } = event.data;
                     const uint8Array = new Uint8Array(pdfData);
 
                     // Process PDF using pdfBridge
                     const result = await window.pdfBridge.loadPdfComplete(uint8Array);
 
-                    // Send result back to iframe
-                    event.source.postMessage({
-                        type: 'PDF_PROCESS_RESPONSE',
-                        requestId: event.data.requestId,
-                        success: true,
-                        data: {
-                            success: result.success,
-                            numPages: result.numPages,
-                            pages: Array.from(result.pages).map(page => ({
-                                pageNum: page.pageNum,
-                                width: page.width,
-                                height: page.height,
-                                blocks: Array.from(page.blocks).map(block => ({
-                                    bbox: Array.from(block.bbox),
-                                    lines: Array.from(block.lines).map(line =>
-                                        Array.from(line).map(item => ({
-                                            text: item.text,
-                                            bbox: Array.from(item.bbox),
-                                            font: item.font,
-                                            size: item.size
-                                        }))
-                                    )
+                    if (result.success) {
+                        // Store for later pixel requests
+                        window.pdfDataStore[filename] = result;
+
+                        // Send response back to Worker
+                        event.source.postMessage({
+                            type: 'PROCESS_PDF_RESPONSE',
+                            requestId: requestId,
+                            success: true,
+                            data: {
+                                numPages: result.numPages,
+                                pages: result.pages.map(page => ({
+                                    pageNum: page.pageNum,
+                                    width: page.width,
+                                    height: page.height,
+                                    blocks: page.blocks.map(block => ({
+                                        bbox: Array.from(block.bbox),
+                                        lines: block.lines.map(line =>
+                                            line.map(item => ({
+                                                text: item.text,
+                                                bbox: Array.from(item.bbox),
+                                                font: item.font,
+                                                size: item.size
+                                            }))
+                                        )
+                                    }))
                                 }))
-                            }))
-                        }
-                    }, '*');
+                            }
+                        }, '*');
+                    } else {
+                        event.source.postMessage({
+                            type: 'PROCESS_PDF_RESPONSE',
+                            requestId: requestId,
+                            success: false,
+                            error: result.error
+                        }, '*');
+                    }
                 } catch (error) {
                     event.source.postMessage({
-                        type: 'PDF_PROCESS_RESPONSE',
+                        type: 'PROCESS_PDF_RESPONSE',
                         requestId: event.data.requestId,
                         success: false,
                         error: error.message
                     }, '*');
                 }
-            } else if (event.data.type === 'PDF_RENDER_REQUEST') {
+            } else if (event.data.type === 'GET_PIXEL_DATA') {
                 try {
-                    const { pageNum, x, y, width, height } = event.data;
+                    const { requestId, filename, pageNum, x, y, width, height } = event.data;
+                    const pdfData = window.pdfDataStore[filename];
+
+                    if (!pdfData || !pdfData.pages) {
+                        throw new Error('PDF not loaded');
+                    }
+
                     const result = await window.pdfBridge.getPixelData(pageNum, x, y, width, height);
 
                     event.source.postMessage({
-                        type: 'PDF_RENDER_RESPONSE',
-                        requestId: event.data.requestId,
+                        type: 'GET_PIXEL_DATA_RESPONSE',
+                        requestId: requestId,
                         success: true,
                         data: {
                             width: result.width,
@@ -244,8 +264,8 @@
                     }, '*');
                 } catch (error) {
                     event.source.postMessage({
-                        type: 'PDF_RENDER_RESPONSE',
-                        requestId: event.data.requestId,
+                        type: 'GET_PIXEL_DATA_RESPONSE',
+                        requestId: requestId,
                         success: false,
                         error: error.message
                     }, '*');

@@ -1,13 +1,17 @@
 try:
-    # Try to use component-based wrapper (for Stlite/browser environment)
-    from check_logic import pdf_wrapper_component as fitz
+    # Try to use async wrapper (for Stlite/browser environment with Worker)
+    from check_logic import pdf_wrapper_async as fitz
 except ImportError:
     try:
-        # Try to use PDF.js wrapper (for browser/Pyodide environment)
-        from check_logic import pdf_wrapper as fitz
+        # Try to use component-based wrapper (for Stlite/browser environment)
+        from check_logic import pdf_wrapper_component as fitz
     except ImportError:
-        # Fallback to PyMuPDF (for local testing)
-        import pymupdf as fitz
+        try:
+            # Try to use PDF.js wrapper (for browser/Pyodide environment)
+            from check_logic import pdf_wrapper as fitz
+        except ImportError:
+            # Fallback to PyMuPDF (for local testing)
+            import pymupdf as fitz
 
 import re
 from collections import defaultdict
@@ -48,11 +52,11 @@ ALLOWED_AREA = (
 # 2. 辅助工具函数
 # ==========================================
 
-def count_lines(page, rect, invert=False, stop=30):
+async def count_lines(page, rect, invert=False, stop=30):
     """通过像素分析计算空白行数 (核心黑科技)"""
     try:
         # 获取灰度位图
-        pix = page.get_pixmap(clip=rect, colorspace=fitz.csGRAY, alpha=False)
+        pix = await page.get_pixmap(clip=rect, colorspace=fitz.csGRAY, alpha=False)
         w, h, pixels = pix.width, pix.height, pix.samples
 
         # 将字节流转换为行数据
@@ -169,7 +173,7 @@ def find_margins(doc, start=1):
                     })
     return violations
 
-def find_sections(doc, start=1):
+async def find_sections(doc, start=1):
     violations = []
 
     for page in doc:
@@ -214,7 +218,7 @@ def find_sections(doc, start=1):
 
                 # 检查下方间距
                 rect_below = fitz.Rect(x0, y1 + 1, x1, y1 + int(req_below))
-                lines_below = count_lines(page, rect_below, stop=int(req_below))
+                lines_below = await count_lines(page, rect_below, stop=int(req_below))
 
                 if lines_below < int(req_below):
                     violations.append({
@@ -225,7 +229,7 @@ def find_sections(doc, start=1):
 
                 # 检查上方间距
                 rect_above = fitz.Rect(x0, y0 - int(req_above), x1, y0 - 1)
-                lines_above = count_lines(page, rect_above, invert=True, stop=int(req_above))
+                lines_above = await count_lines(page, rect_above, invert=True, stop=int(req_above))
 
                 if lines_above < int(req_above):
                     violations.append({
@@ -235,7 +239,7 @@ def find_sections(doc, start=1):
                     })
     return violations
 
-def find_captions(doc, start=1):
+async def find_captions(doc, start=1):
     violations = []
 
     for page in doc:
@@ -274,7 +278,7 @@ def find_captions(doc, start=1):
 
                 # 检查 Caption 上方间距 (通常用于 Table)
                 rect_above = fitz.Rect(x0, y0 - CAPTION_LINES_ABOVE, x1, y0 - 1)
-                lines_above = count_lines(page, rect_above, True, stop=10)
+                lines_above = await count_lines(page, rect_above, True, stop=10)
 
                 if lines_above < CAPTION_LINES_ABOVE:
                      violations.append({
@@ -286,7 +290,7 @@ def find_captions(doc, start=1):
                 # 检查 Caption 下方间距
                 if CAPTION_LINES_BELOW > 0:
                     rect_below = fitz.Rect(x0, y1 + 3, x1, y1 + CAPTION_LINES_BELOW - 2)
-                    lines_below = count_lines(page, rect_below, False, stop=10)
+                    lines_below = await count_lines(page, rect_below, False, stop=10)
                     if lines_below < CAPTION_LINES_BELOW:
                          violations.append({
                             "type": f"Spacing BELOW caption too small",
@@ -369,7 +373,7 @@ def font_stats(doc, start=1):
 # 4. 主入口函数 (供 Stlite 调用)
 # ==========================================
 
-def run_check(uploaded_file):
+async def run_check(uploaded_file):
     """
     接收 Streamlit UploadedFile 对象，返回检测结果字典
     """
@@ -381,7 +385,7 @@ def run_check(uploaded_file):
         import sys
         print(f"DEBUG: File size: {len(file_bytes)} bytes", file=sys.stderr)
 
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        doc = await fitz.open(stream=file_bytes, filetype="pdf")
 
         print(f"DEBUG: PDF loaded successfully, {doc.num_pages} pages", file=sys.stderr)
 
@@ -391,10 +395,10 @@ def run_check(uploaded_file):
         all_violations.extend(find_margins(doc, start=1))
 
         # 2. 章节间距检查
-        all_violations.extend(find_sections(doc, start=1))
+        all_violations.extend(await find_sections(doc, start=1))
 
         # 3. 标题间距检查
-        all_violations.extend(find_captions(doc, start=1))
+        all_violations.extend(await find_captions(doc, start=1))
 
         # 4. 附录完整性检查
         all_violations.extend(find_appendices(doc, start=1))
