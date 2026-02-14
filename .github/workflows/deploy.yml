@@ -2,7 +2,7 @@ name: Deploy PaperLint to Pages
 
 on:
   push:
-    branches: [ main ]  # 监听 main 分支的提交
+    branches: [ master ]  # 监听 master 分支的提交
   workflow_dispatch:    # 允许手动触发
 
 jobs:
