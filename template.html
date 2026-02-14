@@ -186,9 +186,12 @@
             requirements: [],  // No Python dependencies needed - using PDF.js
             entrypoint: "main.py",
             files: {{FILES_JSON}},
-        }, document.getElementById("root")).then(() => {
+        }, document.getElementById("root"));
+
+        // Hide loading message after a short delay
+        setTimeout(() => {
             loadingDiv.style.display = 'none';
-        });
+        }, 3000);
     </script>
 </body>
 </html>
