@@ -201,24 +201,43 @@
                     // Process PDF using pdfBridge
                     const result = await window.pdfBridge.loadPdfComplete(uint8Array);
 
-                    // Send response back to worker
-                    event.source.postMessage({
+                    const response = {
                         type: 'PROCESS_PDF_RESPONSE',
                         requestId: data.requestId,
                         success: result.success,
                         data: result.success ? result : null,
                         error: result.success ? null : result.error
-                    }, '*');
+                    };
+
+                    // Try multiple methods to send response back to worker
+                    if (event.source && event.source.postMessage) {
+                        event.source.postMessage(response, '*');
+                        console.log('Sent response via event.source');
+                    } else if (stliteWorker && stliteWorker.postMessage) {
+                        stliteWorker.postMessage(response);
+                        console.log('Sent response via stliteWorker');
+                    } else if (event.ports && event.ports[0]) {
+                        event.ports[0].postMessage(response);
+                        console.log('Sent response via event.ports');
+                    } else {
+                        console.error('No method available to send response back to worker');
+                    }
 
                     console.log('Sent PROCESS_PDF response:', data.requestId, result.success);
                 } catch (error) {
                     console.error('Error processing PDF:', error);
-                    event.source.postMessage({
+                    const errorResponse = {
                         type: 'PROCESS_PDF_RESPONSE',
                         requestId: data.requestId,
                         success: false,
                         error: error.message
-                    }, '*');
+                    };
+
+                    if (event.source && event.source.postMessage) {
+                        event.source.postMessage(errorResponse, '*');
+                    } else if (stliteWorker && stliteWorker.postMessage) {
+                        stliteWorker.postMessage(errorResponse);
+                    }
                 }
             }
 
@@ -236,21 +255,32 @@
                         data.height
                     );
 
-                    // Send response back to worker
-                    event.source.postMessage({
+                    const response = {
                         type: 'GET_PIXEL_DATA_RESPONSE',
                         requestId: data.requestId,
                         success: true,
                         data: pixelData
-                    }, '*');
+                    };
+
+                    if (event.source && event.source.postMessage) {
+                        event.source.postMessage(response, '*');
+                    } else if (stliteWorker && stliteWorker.postMessage) {
+                        stliteWorker.postMessage(response);
+                    }
                 } catch (error) {
                     console.error('Error getting pixel data:', error);
-                    event.source.postMessage({
+                    const errorResponse = {
                         type: 'GET_PIXEL_DATA_RESPONSE',
                         requestId: data.requestId,
                         success: false,
                         error: error.message
-                    }, '*');
+                    };
+
+                    if (event.source && event.source.postMessage) {
+                        event.source.postMessage(errorResponse, '*');
+                    } else if (stliteWorker && stliteWorker.postMessage) {
+                        stliteWorker.postMessage(errorResponse);
+                    }
                 }
             }
         });
@@ -321,11 +351,21 @@
         // Start intercepting after a short delay to ensure Stlite is ready
         setTimeout(setupFileUploadInterceptor, 1000);
 
+        // Store reference to Stlite instance for worker communication
+        let stliteWorker = null;
+
         stlite.mount({
             requirements: [],  // No Python dependencies needed - using PDF.js
             entrypoint: "main.py",
             files: {{FILES_JSON}},
-        }, document.getElementById("root"));
+        }, document.getElementById("root")).then((instance) => {
+            console.log('Stlite mounted successfully');
+            // Store worker reference if available
+            if (instance && instance._worker) {
+                stliteWorker = instance._worker;
+                console.log('Stlite worker reference stored');
+            }
+        });
 
         // Hide loading message after a short delay
         setTimeout(() => {
