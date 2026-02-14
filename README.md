@@ -4,7 +4,7 @@ PaperLint 是一个专注于学术论文格式合规性的在线检查工具。
 
 它旨在帮助作者在提交前快速发现常见的格式错误（如页边距溢出、字体未嵌入、标题间距违规等），从而降低 Desk Rejection 的风险。
 
-👉 **[点击这里开始使用](https://你的用户名.github.io/你的仓库名/)**
+👉 **[点击这里开始使用](https://spingarbor.github.io/CheckMyPaper/)**
 
 ## ✨ 核心特性
 
