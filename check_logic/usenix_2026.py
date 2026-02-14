@@ -60,6 +60,10 @@ ALLOWED_AREA = (
 # 2. 辅助工具函数
 # ==========================================
 
+def get_page_number(page):
+    """Get page number - compatible with both PyMuPDF and custom wrappers"""
+    return getattr(page, 'page_num', None) or page.number
+
 def count_lines(page, rect, invert=False, stop=30):
     """通过像素分析计算空白行数 (核心黑科技)"""
     try:
@@ -114,7 +118,7 @@ def find_margins(doc, start=1):
     violations = []
 
     for page in doc:
-        page_num = page.page_num
+        page_num = get_page_number(page)
         if page_num < start:
             continue
 
@@ -185,7 +189,7 @@ def find_sections(doc, start=1):
     violations = []
 
     for page in doc:
-        page_num = page.page_num
+        page_num = get_page_number(page)
         if page_num < start or page_num == 1:
             continue  # 跳过首页
 
@@ -251,7 +255,7 @@ def find_captions(doc, start=1):
     violations = []
 
     for page in doc:
-        page_num = page.page_num
+        page_num = get_page_number(page)
         if page_num < start or page_num == 1:
             continue
 
@@ -312,7 +316,7 @@ def find_appendices(doc, start=1):
     found_pages = {"Ethical": None, "Ethics": None, "Open": None}
 
     for page in doc:
-        page_num = page.page_num
+        page_num = get_page_number(page)
         if page_num < start:
             continue
 
@@ -349,7 +353,7 @@ def font_stats(doc, start=1):
     total_len = 0
 
     for page in doc:
-        page_num = page.page_num
+        page_num = get_page_number(page)
         if page_num < start:
             continue
 
@@ -394,7 +398,12 @@ def run_check(uploaded_file):
         print(f"DEBUG: File size: {len(file_bytes)} bytes", file=sys.stderr)
 
         # Open the PDF - handle both sync and async wrappers
-        doc_or_coro = fitz.open(stream=file_bytes, filetype="pdf", filename=uploaded_file.name)
+        # Try with filename parameter first (for custom wrappers), fall back without it (for PyMuPDF)
+        try:
+            doc_or_coro = fitz.open(stream=file_bytes, filetype="pdf", filename=uploaded_file.name)
+        except TypeError:
+            # PyMuPDF doesn't accept filename parameter
+            doc_or_coro = fitz.open(stream=file_bytes, filetype="pdf")
 
         # Check if the result is a coroutine (async wrapper)
         import inspect
@@ -414,7 +423,7 @@ def run_check(uploaded_file):
             # Synchronous wrapper
             doc = doc_or_coro
 
-        print(f"DEBUG: PDF loaded successfully, {doc.num_pages} pages", file=sys.stderr)
+        print(f"DEBUG: PDF loaded successfully, {getattr(doc, 'num_pages', None) or doc.page_count} pages", file=sys.stderr)
 
         all_violations = []
 
