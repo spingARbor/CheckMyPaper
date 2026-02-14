@@ -376,24 +376,24 @@
         // Store reference to Stlite instance for worker communication
         window.stliteWorker = null;
 
-        stlite.mount({
+        // Mount Stlite
+        const stliteInstance = stlite.mount({
             requirements: [],  // No Python dependencies needed - using PDF.js
             entrypoint: "main.py",
             files: {{FILES_JSON}},
-        }, document.getElementById("root")).then((instance) => {
-            console.log('Stlite mounted successfully', instance);
-            // Try to get worker reference from various possible locations
-            if (instance) {
-                window.stliteWorker = instance._worker || instance.worker || instance._pyodideWorker || null;
-                if (window.stliteWorker) {
-                    console.log('Stlite worker reference stored');
-                } else {
-                    console.warn('Could not find worker reference in instance:', Object.keys(instance));
-                }
+        }, document.getElementById("root"));
+
+        console.log('Stlite mounted, instance:', stliteInstance);
+
+        // Try to get worker reference from the instance
+        if (stliteInstance) {
+            window.stliteWorker = stliteInstance._worker || stliteInstance.worker || stliteInstance._pyodideWorker || null;
+            if (window.stliteWorker) {
+                console.log('Stlite worker reference stored');
+            } else {
+                console.warn('Could not find worker reference in instance:', Object.keys(stliteInstance || {}));
             }
-        }).catch((error) => {
-            console.error('Stlite mount error:', error);
-        });
+        }
 
         // Hide loading message after a short delay
         setTimeout(() => {
