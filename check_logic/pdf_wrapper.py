@@ -147,26 +147,33 @@ class Document:
 
     async def _load(self):
         """Load PDF using PDF.js bridge"""
-        # Convert bytes to Uint8Array for JavaScript
-        uint8_array = to_js(self.file_bytes)
+        try:
+            # Convert bytes to Uint8Array for JavaScript
+            uint8_array = to_js(self.file_bytes)
 
-        # Call the async JavaScript function - it returns a Promise
-        promise = js.pdfBridge.loadPdfComplete(uint8_array)
+            # Check if pdfBridge exists
+            if not hasattr(js, 'pdfBridge'):
+                raise Exception("pdfBridge not found in JavaScript context")
 
-        # Await the promise to get the resolved value
-        result = await promise
+            # Call the async JavaScript function - it returns a Promise
+            promise = js.pdfBridge.loadPdfComplete(uint8_array)
 
-        if not result.success:
-            raise Exception(f"Failed to load PDF: {result.error}")
+            # Await the promise to get the resolved value
+            result = await promise
 
-        self._pdf_data = result
-        self.num_pages = int(result.numPages)
+            if not result.success:
+                raise Exception(f"Failed to load PDF: {result.error}")
 
-        # Create page objects
-        pages_js = result.pages
-        for i in range(len(pages_js)):
-            page_data = pages_js[i]
-            self._pages.append(Page(self, int(page_data.pageNum), page_data))
+            self._pdf_data = result
+            self.num_pages = int(result.numPages)
+
+            # Create page objects
+            pages_js = result.pages
+            for i in range(len(pages_js)):
+                page_data = pages_js[i]
+                self._pages.append(Page(self, int(page_data.pageNum), page_data))
+        except Exception as e:
+            raise Exception(f"Error in Document._load(): {type(e).__name__}: {str(e)}")
 
     def __iter__(self):
         """Iterate over pages"""

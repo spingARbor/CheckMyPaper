@@ -372,7 +372,14 @@ async def run_check(uploaded_file):
     try:
         # 读取文件流
         file_bytes = uploaded_file.read()
+
+        # 调试信息：文件大小
+        import sys
+        print(f"DEBUG: File size: {len(file_bytes)} bytes", file=sys.stderr)
+
         doc = await fitz.open(stream=file_bytes, filetype="pdf")
+
+        print(f"DEBUG: PDF loaded successfully, {doc.num_pages} pages", file=sys.stderr)
 
         all_violations = []
 
@@ -398,7 +405,11 @@ async def run_check(uploaded_file):
         }
 
     except Exception as e:
+        import traceback
+        import sys
+        # 打印完整的 traceback 到 stderr
+        traceback.print_exc(file=sys.stderr)
         return {
             "status": "error",
-            "message": f"An internal error occurred: {str(e)}"
+            "message": f"An internal error occurred: {type(e).__name__}: {str(e)}"
         }
