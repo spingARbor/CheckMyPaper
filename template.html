@@ -183,95 +183,73 @@
         };
 
         // Store for pre-processed PDF data
-        window.pdfDataStore = {};
+        window.preprocessedPDFs = {};
 
-        // Message handler for Worker communication
-        window.addEventListener('message', async function(event) {
-            // Handle requests from Pyodide Worker
-            if (event.data.type === 'PROCESS_PDF') {
-                try {
-                    const { requestId, filename, pdfData } = event.data;
-                    const uint8Array = new Uint8Array(pdfData);
+        // Intercept file uploads and preprocess PDFs
+        function setupFileUploadInterceptor() {
+            // Use MutationObserver to detect when Streamlit creates file upload inputs
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.nodeType === 1) { // Element node
+                            // Find file input elements
+                            const fileInputs = node.querySelectorAll ? node.querySelectorAll('input[type="file"]') : [];
+                            fileInputs.forEach(attachPreprocessor);
 
-                    // Process PDF using pdfBridge
-                    const result = await window.pdfBridge.loadPdfComplete(uint8Array);
-
-                    if (result.success) {
-                        // Store for later pixel requests
-                        window.pdfDataStore[filename] = result;
-
-                        // Send response back to Worker
-                        event.source.postMessage({
-                            type: 'PROCESS_PDF_RESPONSE',
-                            requestId: requestId,
-                            success: true,
-                            data: {
-                                numPages: result.numPages,
-                                pages: result.pages.map(page => ({
-                                    pageNum: page.pageNum,
-                                    width: page.width,
-                                    height: page.height,
-                                    blocks: page.blocks.map(block => ({
-                                        bbox: Array.from(block.bbox),
-                                        lines: block.lines.map(line =>
-                                            line.map(item => ({
-                                                text: item.text,
-                                                bbox: Array.from(item.bbox),
-                                                font: item.font,
-                                                size: item.size
-                                            }))
-                                        )
-                                    }))
-                                }))
+                            // Also check if the node itself is a file input
+                            if (node.tagName === 'INPUT' && node.type === 'file') {
+                                attachPreprocessor(node);
                             }
-                        }, '*');
-                    } else {
-                        event.source.postMessage({
-                            type: 'PROCESS_PDF_RESPONSE',
-                            requestId: requestId,
-                            success: false,
-                            error: result.error
-                        }, '*');
-                    }
-                } catch (error) {
-                    event.source.postMessage({
-                        type: 'PROCESS_PDF_RESPONSE',
-                        requestId: event.data.requestId,
-                        success: false,
-                        error: error.message
-                    }, '*');
-                }
-            } else if (event.data.type === 'GET_PIXEL_DATA') {
-                try {
-                    const { requestId, filename, pageNum, x, y, width, height } = event.data;
-                    const pdfData = window.pdfDataStore[filename];
-
-                    if (!pdfData || !pdfData.pages) {
-                        throw new Error('PDF not loaded');
-                    }
-
-                    const result = await window.pdfBridge.getPixelData(pageNum, x, y, width, height);
-
-                    event.source.postMessage({
-                        type: 'GET_PIXEL_DATA_RESPONSE',
-                        requestId: requestId,
-                        success: true,
-                        data: {
-                            width: result.width,
-                            height: result.height,
-                            pixels: Array.from(result.pixels)
                         }
-                    }, '*');
-                } catch (error) {
-                    event.source.postMessage({
-                        type: 'GET_PIXEL_DATA_RESPONSE',
-                        requestId: requestId,
-                        success: false,
-                        error: error.message
-                    }, '*');
+                    });
+                });
+            });
+
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+
+            // Also check existing file inputs
+            document.querySelectorAll('input[type="file"]').forEach(attachPreprocessor);
+        }
+
+        function attachPreprocessor(fileInput) {
+            // Avoid attaching multiple times
+            if (fileInput.dataset.preprocessorAttached) return;
+            fileInput.dataset.preprocessorAttached = 'true';
+
+            fileInput.addEventListener('change', async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                // Only process PDF files
+                if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                    console.log('Preprocessing PDF:', file.name);
+
+                    try {
+                        const arrayBuffer = await file.arrayBuffer();
+                        const uint8Array = new Uint8Array(arrayBuffer);
+
+                        // Process PDF using pdfBridge
+                        const result = await window.pdfBridge.loadPdfComplete(uint8Array);
+
+                        if (result.success) {
+                            // Store the processed data with the filename as key
+                            window.preprocessedPDFs[file.name] = result;
+                            console.log('PDF preprocessed successfully:', file.name);
+                        } else {
+                            console.error('PDF preprocessing failed:', result.error);
+                        }
+                    } catch (error) {
+                        console.error('Error preprocessing PDF:', error);
+                    }
                 }
-            }
-        });
+            });
+        }
+
+        // Start intercepting after a short delay to ensure Stlite is ready
+        setTimeout(setupFileUploadInterceptor, 1000);
 
         stlite.mount({
             requirements: [],  // No Python dependencies needed - using PDF.js

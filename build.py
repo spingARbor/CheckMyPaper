@@ -66,59 +66,15 @@ if uploaded_file and selected_conf:
             with st.spinner("正在本地分析文档结构 (这可能需要几秒钟)..."):
                 uploaded_file.seek(0)
                 try:
-                    # Use Pyodide's top-level await support
-                    # In Pyodide/Stlite, we can use await at the top level
-                    import asyncio
-
-                    # Check if we're in an async context
-                    try:
-                        # Try to get the running loop
-                        loop = asyncio.get_running_loop()
-                        # We have a running loop, so we need to use ensure_future
-                        # and then use a callback
-                        future = asyncio.ensure_future(checker_module.run_check(uploaded_file))
-
-                        # Store result in session state to avoid blocking
-                        if 'check_result' not in st.session_state:
-                            st.session_state.check_result = None
-
-                        def on_complete(task):
-                            try:
-                                st.session_state.check_result = task.result()
-                            except Exception as e:
-                                import traceback
-                                st.session_state.check_result = {
-                                    "status": "error",
-                                    "message": f"处理出错: {type(e).__name__}: {str(e)}",
-                                    "traceback": traceback.format_exc()
-                                }
-                            # Trigger a rerun to show results
-                            st.rerun()
-
-                        future.add_done_callback(on_complete)
-
-                        # Show a message that processing is in progress
-                        st.info("正在处理中，请稍候...")
-                        st.stop()
-
-                    except RuntimeError:
-                        # No running loop, we can use asyncio.run()
-                        results = asyncio.run(checker_module.run_check(uploaded_file))
-                        st.session_state.check_result = results
-
+                    # Simple synchronous call - no asyncio needed
+                    results = checker_module.run_check(uploaded_file)
                 except Exception as e:
                     import traceback
-                    st.session_state.check_result = {
+                    results = {
                         "status": "error",
                         "message": f"调用检查函数时出错: {type(e).__name__}: {str(e)}",
                         "traceback": traceback.format_exc()
                     }
-
-            # Check if we have results in session state
-            if 'check_result' in st.session_state and st.session_state.check_result:
-                results = st.session_state.check_result
-                # Clear the result after displaying
-                st.session_state.check_result = None
 
                 # --- 结果展示逻辑 ---
                 if results["status"] == "error":
