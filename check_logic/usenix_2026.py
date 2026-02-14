@@ -406,10 +406,9 @@ async def run_check(uploaded_file):
 
     except Exception as e:
         import traceback
-        import sys
-        # 打印完整的 traceback 到 stderr
-        traceback.print_exc(file=sys.stderr)
+        # 返回详细的错误信息和完整的 traceback
         return {
             "status": "error",
-            "message": f"An internal error occurred: {type(e).__name__}: {str(e)}"
+            "message": f"An internal error occurred: {type(e).__name__}: {str(e)}",
+            "traceback": traceback.format_exc()
         }

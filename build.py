@@ -68,11 +68,23 @@ if uploaded_file and selected_conf:
                 # 调用核心检查函数 (使用 await 直接调用异步函数)
                 # 注意：文件指针在读取后需要重置，但 fitz.open(stream=...) 处理字节流，这里传递 file object
                 uploaded_file.seek(0)
-                results = await checker_module.run_check(uploaded_file)
-            
+                try:
+                    results = await checker_module.run_check(uploaded_file)
+                except Exception as e:
+                    import traceback
+                    results = {
+                        "status": "error",
+                        "message": f"调用检查函数时出错: {type(e).__name__}: {str(e)}",
+                        "traceback": traceback.format_exc()
+                    }
+
             # --- 结果展示逻辑 ---
             if results["status"] == "error":
                 st.error(f"分析过程中发生错误: {results.get('message')}")
+                # 显示详细的 traceback
+                if "traceback" in results:
+                    with st.expander("查看详细错误信息"):
+                        st.code(results["traceback"])
             else:
                 violations = results["violations"]
                 
