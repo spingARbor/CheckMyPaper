@@ -5,6 +5,33 @@ preprocess the PDF when it's uploaded.
 """
 import js
 
+# Storage for preprocessed PDF data received from main thread
+_worker_pdf_storage = {}
+
+# Message handler to receive preprocessed data from main thread
+def _handle_preprocessed_data(event):
+    """Handle PREPROCESSED_PDF_DATA messages from main thread"""
+    try:
+        data = event.data
+        if hasattr(data, 'to_py'):
+            data = data.to_py()
+
+        if isinstance(data, dict) and data.get('type') == 'PREPROCESSED_PDF_DATA':
+            filename = data.get('filename')
+            pdf_data = data.get('data')
+            if filename and pdf_data:
+                _worker_pdf_storage[filename] = pdf_data
+                print(f"Received preprocessed PDF data for: {filename}")
+    except Exception as e:
+        print(f"Error handling preprocessed data: {e}")
+
+# Register message handler
+try:
+    js.self.addEventListener('message', _handle_preprocessed_data)
+    print("Registered preprocessed data message handler")
+except Exception as e:
+    print(f"Failed to register message handler: {e}")
+
 # Check if we can access the required JavaScript objects during import
 # If not, raise ImportError so the code falls back to async wrapper
 _preprocessed_pdfs = None
@@ -25,11 +52,12 @@ try:
         except:
             pass
 
-    # If we still can't access it, this wrapper won't work
+    # If we can't access window.preprocessedPDFs, we'll use worker storage instead
+    # Don't raise ImportError - we can still work with data sent via postMessage
     if _preprocessed_pdfs is None:
-        raise ImportError("preprocessedPDFs not accessible in this context (likely running in Worker)")
+        print("preprocessedPDFs not accessible, will use worker storage")
 except Exception as e:
-    raise ImportError(f"Cannot use preprocessed wrapper: {e}")
+    print(f"Note: {e}")
 
 
 class Rect:
@@ -170,37 +198,56 @@ def open(stream=None, filetype=None, filename=None):
         sample = stream[:1000] if len(stream) > 1000 else stream
         filename = hashlib.md5(sample).hexdigest() + ".pdf"
 
-    # Try to get preprocessed data from window.preprocessedPDFs
+    # Try to get preprocessed data from worker storage first, then window.preprocessedPDFs
     try:
-        # Use the global reference we checked during import
-        preprocessed_pdfs = _preprocessed_pdfs
+        pdf_data = None
 
-        # Check if our file has been preprocessed
-        if not hasattr(preprocessed_pdfs, filename):
-            # Try to find by checking all keys (in case filename doesn't match exactly)
-            available_files = []
-            try:
-                # Get all keys from the JavaScript object
-                keys = js.Object.keys(preprocessed_pdfs)
-                for i in range(len(keys)):
-                    available_files.append(str(keys[i]))
+        # Method 1: Check worker storage (data sent via postMessage)
+        if filename in _worker_pdf_storage:
+            print(f"Using preprocessed data from worker storage: {filename}")
+            pdf_data = _worker_pdf_storage[filename]
+        # Method 2: Try to access window.preprocessedPDFs
+        elif _preprocessed_pdfs is not None:
+            preprocessed_pdfs = _preprocessed_pdfs
 
-                if len(available_files) > 0:
-                    # Use the first available file
-                    filename = available_files[0]
-                    print(f"Using preprocessed file: {filename}")
-                else:
+            # Check if our file has been preprocessed
+            if not hasattr(preprocessed_pdfs, filename):
+                # Try to find by checking all keys (in case filename doesn't match exactly)
+                available_files = []
+                try:
+                    # Get all keys from the JavaScript object
+                    keys = js.Object.keys(preprocessed_pdfs)
+                    for i in range(len(keys)):
+                        available_files.append(str(keys[i]))
+
+                    if len(available_files) > 0:
+                        # Use the first available file
+                        filename = available_files[0]
+                        print(f"Using preprocessed file: {filename}")
+                    else:
+                        raise Exception("No preprocessed PDF data found. Please upload a PDF file first.")
+                except:
                     raise Exception("No preprocessed PDF data found. Please upload a PDF file first.")
-            except:
+
+            # Get the preprocessed data
+            pdf_data_js = getattr(preprocessed_pdfs, filename)
+
+            # Convert JavaScript object to Python dict
+            pdf_data = pdf_data_js.to_py()
+        else:
+            # Check if we have any files in worker storage
+            if _worker_pdf_storage:
+                # Use the first available file
+                filename = list(_worker_pdf_storage.keys())[0]
+                print(f"Using first available file from worker storage: {filename}")
+                pdf_data = _worker_pdf_storage[filename]
+            else:
                 raise Exception("No preprocessed PDF data found. Please upload a PDF file first.")
 
-        # Get the preprocessed data
-        pdf_data_js = getattr(preprocessed_pdfs, filename)
-
-        # Convert JavaScript object to Python dict
-        pdf_data = pdf_data_js.to_py()
-
-        return Document(filename, pdf_data)
+        if pdf_data:
+            return Document(filename, pdf_data)
+        else:
+            raise Exception("Failed to retrieve PDF data")
 
     except Exception as e:
         import sys
