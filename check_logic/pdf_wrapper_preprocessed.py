@@ -5,6 +5,32 @@ preprocess the PDF when it's uploaded.
 """
 import js
 
+# Check if we can access the required JavaScript objects during import
+# If not, raise ImportError so the code falls back to async wrapper
+_preprocessed_pdfs = None
+try:
+    # Try to access preprocessedPDFs from various global scopes
+    if hasattr(js, 'globalThis') and hasattr(js.globalThis, 'preprocessedPDFs'):
+        _preprocessed_pdfs = js.globalThis.preprocessedPDFs
+    elif hasattr(js, 'window') and hasattr(js.window, 'preprocessedPDFs'):
+        _preprocessed_pdfs = js.window.preprocessedPDFs
+    elif hasattr(js, 'self') and hasattr(js.self, 'preprocessedPDFs'):
+        _preprocessed_pdfs = js.self.preprocessedPDFs
+    else:
+        # Try using eval as last resort
+        try:
+            _preprocessed_pdfs = js.eval('typeof window !== "undefined" ? window.preprocessedPDFs : (typeof self !== "undefined" ? self.preprocessedPDFs : undefined)')
+            if _preprocessed_pdfs is None or str(_preprocessed_pdfs) == 'undefined':
+                _preprocessed_pdfs = None
+        except:
+            pass
+
+    # If we still can't access it, this wrapper won't work
+    if _preprocessed_pdfs is None:
+        raise ImportError("preprocessedPDFs not accessible in this context (likely running in Worker)")
+except Exception as e:
+    raise ImportError(f"Cannot use preprocessed wrapper: {e}")
+
 
 class Rect:
     """Simple rectangle class"""
@@ -146,13 +172,8 @@ def open(stream=None, filetype=None, filename=None):
 
     # Try to get preprocessed data from window.preprocessedPDFs
     try:
-        # Access the global JavaScript object
-        # Use globalThis which works in both main thread and worker contexts
-        try:
-            preprocessed_pdfs = js.globalThis.preprocessedPDFs
-        except AttributeError:
-            # Fallback to window if globalThis doesn't work
-            preprocessed_pdfs = js.window.preprocessedPDFs
+        # Use the global reference we checked during import
+        preprocessed_pdfs = _preprocessed_pdfs
 
         # Check if our file has been preprocessed
         if not hasattr(preprocessed_pdfs, filename):
