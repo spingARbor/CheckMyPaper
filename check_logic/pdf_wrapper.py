@@ -117,8 +117,14 @@ class Page:
         if clip is None:
             clip = self.rect
 
+        # Access pdfBridge from window object
+        try:
+            pdfBridge = js.window.pdfBridge
+        except AttributeError:
+            pdfBridge = js.pdfBridge
+
         # Call JavaScript bridge - it returns a Promise
-        promise = js.pdfBridge.getPixelData(
+        promise = pdfBridge.getPixelData(
             self.page_num,
             clip.x0, clip.y0,
             clip.width, clip.height
@@ -151,12 +157,18 @@ class Document:
             # Convert bytes to Uint8Array for JavaScript
             uint8_array = to_js(self.file_bytes)
 
-            # Check if pdfBridge exists
-            if not hasattr(js, 'pdfBridge'):
-                raise Exception("pdfBridge not found in JavaScript context")
+            # Access pdfBridge from window object
+            # In Pyodide, js gives access to the JavaScript global scope
+            try:
+                pdfBridge = js.window.pdfBridge
+            except AttributeError:
+                try:
+                    pdfBridge = js.pdfBridge
+                except AttributeError:
+                    raise Exception("pdfBridge not found. Please ensure the page has fully loaded.")
 
             # Call the async JavaScript function - it returns a Promise
-            promise = js.pdfBridge.loadPdfComplete(uint8_array)
+            promise = pdfBridge.loadPdfComplete(uint8_array)
 
             # Await the promise to get the resolved value
             result = await promise
