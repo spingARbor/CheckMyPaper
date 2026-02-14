@@ -4,6 +4,7 @@ This avoids the Worker communication issue by having the main thread
 preprocess the PDF when it's uploaded.
 """
 import js
+from pyodide.ffi import create_proxy
 
 # Storage for preprocessed PDF data received from main thread
 _worker_pdf_storage = {}
@@ -25,9 +26,12 @@ def _handle_preprocessed_data(event):
     except Exception as e:
         print(f"Error handling preprocessed data: {e}")
 
+# Create a persistent proxy for the message handler
+_message_handler_proxy = create_proxy(_handle_preprocessed_data)
+
 # Register message handler
 try:
-    js.self.addEventListener('message', _handle_preprocessed_data)
+    js.self.addEventListener('message', _message_handler_proxy)
     print("Registered preprocessed data message handler")
 except Exception as e:
     print(f"Failed to register message handler: {e}")

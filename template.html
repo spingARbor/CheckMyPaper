@@ -287,6 +287,8 @@
 
         // Intercept file uploads and preprocess PDFs
         function setupFileUploadInterceptor() {
+            console.log('Setting up file upload interceptor...');
+
             // Use MutationObserver to detect when Streamlit creates file upload inputs
             const observer = new MutationObserver((mutations) => {
                 mutations.forEach((mutation) => {
@@ -319,9 +321,17 @@
             if (fileInput.dataset.preprocessorAttached) return;
             fileInput.dataset.preprocessorAttached = 'true';
 
+            console.log('Attached preprocessor to file input');
+
             fileInput.addEventListener('change', async (event) => {
+                console.log('File input change event triggered');
                 const file = event.target.files[0];
-                if (!file) return;
+                if (!file) {
+                    console.log('No file selected');
+                    return;
+                }
+
+                console.log('File selected:', file.name, file.type);
 
                 // Only process PDF files
                 if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
