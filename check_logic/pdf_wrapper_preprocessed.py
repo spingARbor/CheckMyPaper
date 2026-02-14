@@ -147,7 +147,12 @@ def open(stream=None, filetype=None, filename=None):
     # Try to get preprocessed data from window.preprocessedPDFs
     try:
         # Access the global JavaScript object
-        preprocessed_pdfs = js.window.preprocessedPDFs
+        # Use globalThis which works in both main thread and worker contexts
+        try:
+            preprocessed_pdfs = js.globalThis.preprocessedPDFs
+        except AttributeError:
+            # Fallback to window if globalThis doesn't work
+            preprocessed_pdfs = js.window.preprocessedPDFs
 
         # Check if our file has been preprocessed
         if not hasattr(preprocessed_pdfs, filename):
